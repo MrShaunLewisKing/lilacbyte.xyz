@@ -12,6 +12,11 @@ export function NoticeModal() {
 
   const handleDismiss = () => {
     setIsOpen(false);
+    // Directly trigger audio un-mute and playback on user gesture
+    if (typeof window.__lilacPlayAudio === 'function') {
+      window.__lilacPlayAudio();
+    }
+    window.dispatchEvent(new CustomEvent('lilac_unlock_audio'));
   };
 
   if (!isOpen) return null;
@@ -74,7 +79,7 @@ export function NoticeModal() {
             This website is still a work in progress! Some lower sections contain placeholders, but all profile information at the top is live &amp; accurate.
           </p>
 
-          {/* Action Button */}
+          {/* Action Button: only says 'understood' with a little rose on top right */}
           <div className="relative mt-5 w-full">
             <button
               onClick={handleDismiss}

@@ -18,6 +18,7 @@ declare global {
       ) => YTPlayerInstance;
     };
     onYouTubeIframeAPIReady?: () => void;
+    __lilacPlayAudio?: () => void;
   }
 }
 
@@ -36,9 +37,6 @@ interface YTPlayerInstance {
   getVolume: () => number;
   getPlaylistIndex: () => number;
   getVideoData: () => { title?: string; author?: string; video_id?: string };
-  loadVideoById: (options: { videoId: string; startSeconds?: number }) => void;
-  cuePlaylist: (options: { list: string; listType?: string; index?: number; startSeconds?: number }) => void;
-  loadPlaylist: (options: { list: string; listType?: string; index?: number; startSeconds?: number }) => void;
 }
 
 // Default track: Cruel Summer by Taylor Swift
@@ -75,6 +73,20 @@ export function TopMusicPill() {
       localStorage.setItem(STORAGE_KEYS.IS_PLAYING, isPlaying ? '1' : '0');
     } catch {}
   }, [isPlaying]);
+
+  // Expose global play audio function for modal click trigger
+  useEffect(() => {
+    window.__lilacPlayAudio = () => {
+      if (playerRef.current) {
+        try {
+          playerRef.current.unMute();
+          playerRef.current.setVolume(100);
+          playerRef.current.playVideo();
+          setIsPlaying(true);
+        } catch {}
+      }
+    };
+  }, []);
 
   useEffect(() => {
     // Load YouTube API script
@@ -131,10 +143,11 @@ export function TopMusicPill() {
           events: {
             onReady: (event) => {
               try {
-                // Restore exact position
                 if (savedTimestamp > 0) {
                   event.target.seekTo(savedTimestamp, true);
                 }
+                event.target.unMute();
+                event.target.setVolume(100);
                 event.target.playVideo();
                 setIsPlaying(true);
                 syncTrackInfo(event.target);
@@ -171,14 +184,12 @@ export function TopMusicPill() {
         if (typeof target.getVideoData === 'function') {
           const data = target.getVideoData();
           if (data) {
-            // Save video ID
             if (data.video_id) {
               try {
                 localStorage.setItem(STORAGE_KEYS.VIDEO_ID, data.video_id);
               } catch {}
             }
 
-            // Save clean title
             if (data.title) {
               const clean = data.title
                 .replace(/^Taylor Swift\s*[-–:]\s*/gi, '')
@@ -197,7 +208,6 @@ export function TopMusicPill() {
           }
         }
 
-        // Save playlist index
         if (typeof target.getPlaylistIndex === 'function') {
           const idx = target.getPlaylistIndex();
           if (idx !== undefined && idx >= 0) {
@@ -247,34 +257,31 @@ export function TopMusicPill() {
     window.addEventListener('beforeunload', persistState);
     window.addEventListener('pagehide', persistState);
 
-    // Audio unlock listener for autoplay restrictions
-    const unlockAutoplay = () => {
-      if (playerRef.current && !isPlayingRef.current) {
+    // Immediate audio unlock on user interaction / modal dismiss
+    const unlockAudioDirectly = () => {
+      if (playerRef.current) {
         try {
-          const timeStr = localStorage.getItem(STORAGE_KEYS.TIMESTAMP);
-          if (timeStr) {
-            const time = parseFloat(timeStr);
-            if (!isNaN(time) && time > 0) {
-              playerRef.current.seekTo(time, true);
-            }
-          }
+          playerRef.current.unMute();
+          playerRef.current.setVolume(100);
           playerRef.current.playVideo();
           setIsPlaying(true);
         } catch {}
       }
     };
 
-    window.addEventListener('click', unlockAutoplay, { once: true, passive: true });
-    window.addEventListener('touchstart', unlockAutoplay, { once: true, passive: true });
-    window.addEventListener('keydown', unlockAutoplay, { once: true, passive: true });
+    window.addEventListener('lilac_unlock_audio', unlockAudioDirectly);
+    window.addEventListener('click', unlockAudioDirectly, { once: true, passive: true });
+    window.addEventListener('touchstart', unlockAudioDirectly, { once: true, passive: true });
+    window.addEventListener('keydown', unlockAudioDirectly, { once: true, passive: true });
 
     return () => {
       if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
       window.removeEventListener('beforeunload', persistState);
       window.removeEventListener('pagehide', persistState);
-      window.removeEventListener('click', unlockAutoplay);
-      window.removeEventListener('touchstart', unlockAutoplay);
-      window.removeEventListener('keydown', unlockAutoplay);
+      window.removeEventListener('lilac_unlock_audio', unlockAudioDirectly);
+      window.removeEventListener('click', unlockAudioDirectly);
+      window.removeEventListener('touchstart', unlockAudioDirectly);
+      window.removeEventListener('keydown', unlockAudioDirectly);
     };
   }, []);
 
@@ -286,6 +293,8 @@ export function TopMusicPill() {
         playerRef.current.pauseVideo();
         setIsPlaying(false);
       } else {
+        playerRef.current.unMute();
+        playerRef.current.setVolume(100);
         playerRef.current.playVideo();
         setIsPlaying(true);
       }
