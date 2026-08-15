@@ -34,22 +34,34 @@ interface YTPlayerInstance {
   isMuted: () => boolean;
   setVolume: (volume: number) => void;
   getVolume: () => number;
+  getPlaylistIndex: () => number;
   getVideoData: () => { title?: string; author?: string; video_id?: string };
+  loadVideoById: (options: { videoId: string; startSeconds?: number }) => void;
+  cuePlaylist: (options: { list: string; listType?: string; index?: number; startSeconds?: number }) => void;
+  loadPlaylist: (options: { list: string; listType?: string; index?: number; startSeconds?: number }) => void;
 }
 
-const DEFAULT_VIDEO_ID = '-MtKC5wXqdQ';
-// YouTube playlist/radio mix ID for continuous playlist playback
-const PLAYLIST_ID = 'RD-MtKC5wXqdQ';
-const TIMESTAMP_STORAGE_KEY = 'lilac_music_exact_timestamp';
-const TITLE_STORAGE_KEY = 'lilac_music_current_title';
+// Default track: Cruel Summer by Taylor Swift
+const DEFAULT_VIDEO_ID = 'ic8j13piAhQ';
+const DEFAULT_SONG_NAME = 'Cruel Summer';
+const PLAYLIST_ID = 'RDic8j13piAhQ';
+
+// Storage keys for exact state persistence across reloads
+const STORAGE_KEYS = {
+  VIDEO_ID: 'lilac_music_current_video_id',
+  PLAYLIST_INDEX: 'lilac_music_playlist_index',
+  TIMESTAMP: 'lilac_music_exact_timestamp',
+  TITLE: 'lilac_music_current_title',
+  IS_PLAYING: 'lilac_music_is_playing'
+};
 
 export function TopMusicPill() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [songTitle, setSongTitle] = useState(() => {
     try {
-      return localStorage.getItem(TITLE_STORAGE_KEY) || 'Blank Space';
+      return localStorage.getItem(STORAGE_KEYS.TITLE) || DEFAULT_SONG_NAME;
     } catch {
-      return 'Blank Space';
+      return DEFAULT_SONG_NAME;
     }
   });
 
@@ -59,9 +71,13 @@ export function TopMusicPill() {
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
+    try {
+      localStorage.setItem(STORAGE_KEYS.IS_PLAYING, isPlaying ? '1' : '0');
+    } catch {}
   }, [isPlaying]);
 
   useEffect(() => {
+    // Load YouTube API script
     if (!window.YT) {
       const tag = document.createElement('script');
       tag.src = 'https://www.youtube.com/iframe_api';
@@ -73,25 +89,37 @@ export function TopMusicPill() {
       if (!window.YT || !window.YT.Player) return;
       if (playerRef.current) return;
 
-      let initialStartSeconds = 0;
+      // Retrieve saved state
+      let savedVideoId = DEFAULT_VIDEO_ID;
+      let savedTimestamp = 0;
+      let savedIndex = 0;
+
       try {
-        const savedTimeStr = localStorage.getItem(TIMESTAMP_STORAGE_KEY);
-        if (savedTimeStr) {
-          const parsed = parseFloat(savedTimeStr);
-          if (!isNaN(parsed) && parsed > 0) {
-            initialStartSeconds = parsed;
-          }
+        const vid = localStorage.getItem(STORAGE_KEYS.VIDEO_ID);
+        if (vid && vid.trim()) savedVideoId = vid.trim();
+
+        const timeStr = localStorage.getItem(STORAGE_KEYS.TIMESTAMP);
+        if (timeStr) {
+          const parsed = parseFloat(timeStr);
+          if (!isNaN(parsed) && parsed > 0) savedTimestamp = parsed;
+        }
+
+        const idxStr = localStorage.getItem(STORAGE_KEYS.PLAYLIST_INDEX);
+        if (idxStr) {
+          const parsedIdx = parseInt(idxStr, 10);
+          if (!isNaN(parsedIdx) && parsedIdx >= 0) savedIndex = parsedIdx;
         }
       } catch {}
 
       try {
         playerRef.current = new window.YT.Player('yt-top-pill-player', {
-          videoId: DEFAULT_VIDEO_ID,
+          videoId: savedVideoId,
           playerVars: {
             autoplay: 1,
-            start: Math.floor(initialStartSeconds),
+            start: Math.floor(savedTimestamp),
             listType: 'playlist',
-            list: PLAYLIST_ID, // Loads full playlist / continuous radio queue
+            list: PLAYLIST_ID,
+            index: savedIndex,
             loop: 1,
             playsinline: 1,
             controls: 0,
@@ -103,27 +131,27 @@ export function TopMusicPill() {
           events: {
             onReady: (event) => {
               try {
-                if (initialStartSeconds > 0) {
-                  event.target.seekTo(initialStartSeconds, true);
+                // Restore exact position
+                if (savedTimestamp > 0) {
+                  event.target.seekTo(savedTimestamp, true);
                 }
                 event.target.playVideo();
                 setIsPlaying(true);
-                updateCurrentTitle(event.target);
+                syncTrackInfo(event.target);
               } catch {}
             },
             onStateChange: (event) => {
               // 1 = PLAYING
               if (event.data === 1) {
                 setIsPlaying(true);
-                updateCurrentTitle(event.target);
+                syncTrackInfo(event.target);
               }
-              // 0 = ENDED (Automatically advances to NEXT song in playlist!)
+              // 0 = ENDED (Auto advance to next song in playlist)
               else if (event.data === 0) {
                 try {
                   event.target.nextVideo();
                   setIsPlaying(true);
                 } catch {
-                  // Fallback loop if single item
                   event.target.seekTo(0, true);
                   event.target.playVideo();
                 }
@@ -138,20 +166,43 @@ export function TopMusicPill() {
       } catch {}
     };
 
-    const updateCurrentTitle = (target: YTPlayerInstance) => {
+    const syncTrackInfo = (target: YTPlayerInstance) => {
       try {
         if (typeof target.getVideoData === 'function') {
           const data = target.getVideoData();
-          if (data && data.title) {
-            // Clean up title for concise pill display
-            const cleanTitle = data.title
-              .replace(/\s*\(Official.*?\)/gi, '')
-              .replace(/\s*\[Official.*?\]/gi, '')
-              .replace(/\s*\(Audio.*?\)/gi, '')
-              .trim();
-            setSongTitle(cleanTitle);
+          if (data) {
+            // Save video ID
+            if (data.video_id) {
+              try {
+                localStorage.setItem(STORAGE_KEYS.VIDEO_ID, data.video_id);
+              } catch {}
+            }
+
+            // Save clean title
+            if (data.title) {
+              const clean = data.title
+                .replace(/^Taylor Swift\s*[-–:]\s*/gi, '')
+                .replace(/\s*\(Official.*?\)/gi, '')
+                .replace(/\s*\[Official.*?\]/gi, '')
+                .replace(/\s*\(Audio.*?\)/gi, '')
+                .replace(/\s*\(Lyric Video\)/gi, '')
+                .trim();
+
+              const finalTitle = clean || DEFAULT_SONG_NAME;
+              setSongTitle(finalTitle);
+              try {
+                localStorage.setItem(STORAGE_KEYS.TITLE, finalTitle);
+              } catch {}
+            }
+          }
+        }
+
+        // Save playlist index
+        if (typeof target.getPlaylistIndex === 'function') {
+          const idx = target.getPlaylistIndex();
+          if (idx !== undefined && idx >= 0) {
             try {
-              localStorage.setItem(TITLE_STORAGE_KEY, cleanTitle);
+              localStorage.setItem(STORAGE_KEYS.PLAYLIST_INDEX, idx.toString());
             } catch {}
           }
         }
@@ -164,39 +215,45 @@ export function TopMusicPill() {
       window.onYouTubeIframeAPIReady = initPlayer;
     }
 
-    // Save exact timestamp every 400ms while active
+    // Continuously persist exact timestamp and playlist index every 300ms
     progressIntervalRef.current = setInterval(() => {
       if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
         try {
-          const current = playerRef.current.getCurrentTime();
-          if (current && current > 0) {
-            localStorage.setItem(TIMESTAMP_STORAGE_KEY, current.toString());
+          const currentTime = playerRef.current.getCurrentTime();
+          if (currentTime && currentTime > 0) {
+            localStorage.setItem(STORAGE_KEYS.TIMESTAMP, currentTime.toString());
+          }
+          if (typeof playerRef.current.getPlaylistIndex === 'function') {
+            const idx = playerRef.current.getPlaylistIndex();
+            if (idx !== undefined && idx >= 0) {
+              localStorage.setItem(STORAGE_KEYS.PLAYLIST_INDEX, idx.toString());
+            }
           }
         } catch {}
       }
-    }, 400);
+    }, 300);
 
-    const saveStateBeforeUnload = () => {
+    const persistState = () => {
       if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
         try {
-          const current = playerRef.current.getCurrentTime();
-          if (current && current > 0) {
-            localStorage.setItem(TIMESTAMP_STORAGE_KEY, current.toString());
+          const currentTime = playerRef.current.getCurrentTime();
+          if (currentTime && currentTime > 0) {
+            localStorage.setItem(STORAGE_KEYS.TIMESTAMP, currentTime.toString());
           }
         } catch {}
       }
     };
 
-    window.addEventListener('beforeunload', saveStateBeforeUnload);
-    window.addEventListener('pagehide', saveStateBeforeUnload);
+    window.addEventListener('beforeunload', persistState);
+    window.addEventListener('pagehide', persistState);
 
-    // Auto-unlock playback on first user touch if blocked by autoplay policy
+    // Audio unlock listener for autoplay restrictions
     const unlockAutoplay = () => {
       if (playerRef.current && !isPlayingRef.current) {
         try {
-          const savedTimeStr = localStorage.getItem(TIMESTAMP_STORAGE_KEY);
-          if (savedTimeStr) {
-            const time = parseFloat(savedTimeStr);
+          const timeStr = localStorage.getItem(STORAGE_KEYS.TIMESTAMP);
+          if (timeStr) {
+            const time = parseFloat(timeStr);
             if (!isNaN(time) && time > 0) {
               playerRef.current.seekTo(time, true);
             }
@@ -213,8 +270,8 @@ export function TopMusicPill() {
 
     return () => {
       if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-      window.removeEventListener('beforeunload', saveStateBeforeUnload);
-      window.removeEventListener('pagehide', saveStateBeforeUnload);
+      window.removeEventListener('beforeunload', persistState);
+      window.removeEventListener('pagehide', persistState);
       window.removeEventListener('click', unlockAutoplay);
       window.removeEventListener('touchstart', unlockAutoplay);
       window.removeEventListener('keydown', unlockAutoplay);
@@ -251,7 +308,7 @@ export function TopMusicPill() {
         <div id="yt-top-pill-player" />
       </div>
 
-      {/* Pill: Play/Pause button + Dynamic Playlist Song Name + Next Track button */}
+      {/* Pill: Play/Pause button + Exact Song Title + Next Track button */}
       <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/80 dark:bg-black/40 border border-pink-300/50 dark:border-pink-500/20 text-xs text-pink-600 dark:text-pink-300 font-medium backdrop-blur-md shadow-sm hover:border-pink-400 transition-all select-none">
         <button
           onClick={togglePlay}

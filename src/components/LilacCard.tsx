@@ -370,7 +370,7 @@ export function LilacCard({ isDark, onToggleTheme }: LilacCardProps) {
 
                 {/* YouTube Music Link */}
                 <a
-                  href="https://music.youtube.com/watch?v=-MtKC5wXqdQ"
+                  href="https://music.youtube.com/watch?v=ic8j13piAhQ"
                   target="_blank"
                   rel="noreferrer"
                   className="w-full p-3 rounded-xl bg-white/65 dark:bg-white/5 hover:bg-pink-100/50 dark:hover:bg-pink-900/30 border border-pink-200/50 dark:border-pink-900/30 flex items-center justify-between transition-all group cursor-pointer text-xs"
@@ -381,7 +381,7 @@ export function LilacCard({ isDark, onToggleTheme }: LilacCardProps) {
                     </div>
                     <div>
                       <div className="font-semibold text-foreground">YouTube Music Track</div>
-                      <div className="text-[10px] text-muted-foreground">Blank Space</div>
+                      <div className="text-[10px] text-muted-foreground">Cruel Summer</div>
                     </div>
                   </div>
                   <ExternalLink className="w-3.5 h-3.5 text-muted-foreground group-hover:text-pink-500 transition-colors" />
