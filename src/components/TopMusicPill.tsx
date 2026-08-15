@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Pause } from 'lucide-react';
+import { Play, Pause, SkipForward } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -7,7 +7,7 @@ declare global {
       Player: new (
         elementId: string | HTMLElement,
         config: {
-          videoId: string;
+          videoId?: string;
           playerVars?: Record<string, unknown>;
           events?: {
             onReady?: (event: { target: YTPlayerInstance }) => void;
@@ -24,6 +24,8 @@ declare global {
 interface YTPlayerInstance {
   playVideo: () => void;
   pauseVideo: () => void;
+  nextVideo: () => void;
+  previousVideo: () => void;
   seekTo: (seconds: number, allowSeekAhead: boolean) => void;
   getCurrentTime: () => number;
   getDuration: () => number;
@@ -32,24 +34,31 @@ interface YTPlayerInstance {
   isMuted: () => boolean;
   setVolume: (volume: number) => void;
   getVolume: () => number;
+  getVideoData: () => { title?: string; author?: string; video_id?: string };
 }
 
-const YOUTUBE_VIDEO_ID = '-MtKC5wXqdQ';
-const SONG_NAME = 'Blank Space';
+const DEFAULT_VIDEO_ID = '-MtKC5wXqdQ';
+// YouTube playlist/radio mix ID for continuous playlist playback
+const PLAYLIST_ID = 'RD-MtKC5wXqdQ';
 const TIMESTAMP_STORAGE_KEY = 'lilac_music_exact_timestamp';
-const PLAYING_STORAGE_KEY = 'lilac_music_is_playing';
+const TITLE_STORAGE_KEY = 'lilac_music_current_title';
 
 export function TopMusicPill() {
   const [isPlaying, setIsPlaying] = useState(false);
+  const [songTitle, setSongTitle] = useState(() => {
+    try {
+      return localStorage.getItem(TITLE_STORAGE_KEY) || 'Blank Space';
+    } catch {
+      return 'Blank Space';
+    }
+  });
+
   const playerRef = useRef<YTPlayerInstance | null>(null);
   const isPlayingRef = useRef(false);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
-    try {
-      localStorage.setItem(PLAYING_STORAGE_KEY, isPlaying ? '1' : '0');
-    } catch {}
   }, [isPlaying]);
 
   useEffect(() => {
@@ -62,9 +71,8 @@ export function TopMusicPill() {
 
     const initPlayer = () => {
       if (!window.YT || !window.YT.Player) return;
-      if (playerRef.current) return; // Prevent duplicate initialization
+      if (playerRef.current) return;
 
-      // Read saved timestamp from storage
       let initialStartSeconds = 0;
       try {
         const savedTimeStr = localStorage.getItem(TIMESTAMP_STORAGE_KEY);
@@ -78,12 +86,13 @@ export function TopMusicPill() {
 
       try {
         playerRef.current = new window.YT.Player('yt-top-pill-player', {
-          videoId: YOUTUBE_VIDEO_ID,
+          videoId: DEFAULT_VIDEO_ID,
           playerVars: {
             autoplay: 1,
             start: Math.floor(initialStartSeconds),
+            listType: 'playlist',
+            list: PLAYLIST_ID, // Loads full playlist / continuous radio queue
             loop: 1,
-            playlist: YOUTUBE_VIDEO_ID, // Required by YouTube API for native continuous loop
             playsinline: 1,
             controls: 0,
             disablekb: 1,
@@ -94,26 +103,30 @@ export function TopMusicPill() {
           events: {
             onReady: (event) => {
               try {
-                // Seek directly to exact sub-second timestamp if available
                 if (initialStartSeconds > 0) {
                   event.target.seekTo(initialStartSeconds, true);
                 }
                 event.target.playVideo();
                 setIsPlaying(true);
+                updateCurrentTitle(event.target);
               } catch {}
             },
             onStateChange: (event) => {
               // 1 = PLAYING
               if (event.data === 1) {
                 setIsPlaying(true);
+                updateCurrentTitle(event.target);
               }
-              // 0 = ENDED (Seamless loop repeat)
+              // 0 = ENDED (Automatically advances to NEXT song in playlist!)
               else if (event.data === 0) {
                 try {
+                  event.target.nextVideo();
+                  setIsPlaying(true);
+                } catch {
+                  // Fallback loop if single item
                   event.target.seekTo(0, true);
                   event.target.playVideo();
-                  setIsPlaying(true);
-                } catch {}
+                }
               }
               // 2 = PAUSED
               else if (event.data === 2) {
@@ -122,6 +135,26 @@ export function TopMusicPill() {
             }
           }
         });
+      } catch {}
+    };
+
+    const updateCurrentTitle = (target: YTPlayerInstance) => {
+      try {
+        if (typeof target.getVideoData === 'function') {
+          const data = target.getVideoData();
+          if (data && data.title) {
+            // Clean up title for concise pill display
+            const cleanTitle = data.title
+              .replace(/\s*\(Official.*?\)/gi, '')
+              .replace(/\s*\[Official.*?\]/gi, '')
+              .replace(/\s*\(Audio.*?\)/gi, '')
+              .trim();
+            setSongTitle(cleanTitle);
+            try {
+              localStorage.setItem(TITLE_STORAGE_KEY, cleanTitle);
+            } catch {}
+          }
+        }
       } catch {}
     };
 
@@ -143,7 +176,6 @@ export function TopMusicPill() {
       }
     }, 400);
 
-    // Save on beforeunload / page hide
     const saveStateBeforeUnload = () => {
       if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
         try {
@@ -203,29 +235,49 @@ export function TopMusicPill() {
     } catch {}
   };
 
+  const handleNext = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!playerRef.current) return;
+    try {
+      playerRef.current.nextVideo();
+      setIsPlaying(true);
+    } catch {}
+  };
+
   return (
     <div className="relative">
-      {/* Hidden YouTube Iframe (isolated from re-renders) */}
+      {/* Hidden YouTube Iframe */}
       <div className="hidden">
         <div id="yt-top-pill-player" />
       </div>
 
-      {/* Pill: ONLY Play/Pause button + song name */}
-      <button
-        onClick={togglePlay}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/80 dark:bg-black/40 border border-pink-300/50 dark:border-pink-500/20 text-xs text-pink-600 dark:text-pink-300 font-medium backdrop-blur-md shadow-sm hover:border-pink-400 transition-all cursor-pointer select-none group"
-        title={isPlaying ? 'Pause' : 'Play'}
-      >
-        <span className="p-1 rounded-full bg-pink-100 dark:bg-pink-950/60 text-pink-600 dark:text-pink-300 flex items-center justify-center">
+      {/* Pill: Play/Pause button + Dynamic Playlist Song Name + Next Track button */}
+      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/80 dark:bg-black/40 border border-pink-300/50 dark:border-pink-500/20 text-xs text-pink-600 dark:text-pink-300 font-medium backdrop-blur-md shadow-sm hover:border-pink-400 transition-all select-none">
+        <button
+          onClick={togglePlay}
+          className="p-1 rounded-full bg-pink-100 dark:bg-pink-950/60 text-pink-600 dark:text-pink-300 flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-transform"
+          title={isPlaying ? 'Pause' : 'Play'}
+        >
           {isPlaying ? (
             <Pause className="w-3 h-3 fill-current" />
           ) : (
             <Play className="w-3 h-3 fill-current ml-0.5" />
           )}
+        </button>
+
+        <span className="text-xs font-semibold tracking-tight max-w-[140px] truncate" title={songTitle}>
+          {songTitle}
         </span>
 
-        <span className="text-xs font-semibold tracking-tight">{SONG_NAME}</span>
-      </button>
+        {/* Skip to next song in playlist */}
+        <button
+          onClick={handleNext}
+          className="p-1 text-pink-400 hover:text-pink-600 dark:hover:text-pink-200 transition-colors cursor-pointer"
+          title="Next song in playlist"
+        >
+          <SkipForward className="w-3 h-3 fill-current" fillOpacity={0.25} />
+        </button>
+      </div>
     </div>
   );
 }
