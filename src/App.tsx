@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { LilacCard } from '@/components/LilacCard';
 import { LilacPetalsBackground } from '@/components/LilacPetalsBackground';
+import { NoticeModal } from '@/components/NoticeModal';
 
 function App() {
   const [isDark, setIsDark] = useState(false);
@@ -28,6 +29,9 @@ function App() {
         isDark={isDark}
         onToggleTheme={() => setIsDark(!isDark)}
       />
+
+      {/* Work In Progress Floral Notice Pop-up */}
+      <NoticeModal />
 
     </div>
   );
