@@ -5,22 +5,13 @@ export function NoticeModal() {
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
-    try {
-      const dismissed = sessionStorage.getItem('lilac_notice_dismissed');
-      if (!dismissed) {
-        const timer = setTimeout(() => setIsOpen(true), 500);
-        return () => clearTimeout(timer);
-      }
-    } catch {
-      setIsOpen(true);
-    }
+    // Shows EVERY TIME the page loads/reloads
+    const timer = setTimeout(() => setIsOpen(true), 400);
+    return () => clearTimeout(timer);
   }, []);
 
   const handleDismiss = () => {
     setIsOpen(false);
-    try {
-      sessionStorage.setItem('lilac_notice_dismissed', 'true');
-    } catch {}
   };
 
   if (!isOpen) return null;
@@ -70,7 +61,7 @@ export function NoticeModal() {
           <X className="w-3.5 h-3.5" />
         </button>
 
-        {/* Card Header & Content (Clean, No 🌸 in text) */}
+        {/* Card Header & Content */}
         <div className="pt-1">
           {/* Title */}
           <h3 className="text-base font-bold text-foreground flex items-center justify-center gap-1.5">
@@ -78,19 +69,18 @@ export function NoticeModal() {
             <Sparkles className="w-3.5 h-3.5 text-pink-400 fill-current" fillOpacity={0.25} />
           </h3>
 
-          {/* Clean Notice Message */}
+          {/* Notice Message */}
           <p className="text-xs text-muted-foreground mt-2 leading-relaxed font-normal">
             This website is still a work in progress! Some lower sections contain placeholders, but all profile information at the top is live &amp; accurate.
           </p>
 
-          {/* Action Button: only says 'understood' with a little rose on top right */}
+          {/* Action Button */}
           <div className="relative mt-5 w-full">
             <button
               onClick={handleDismiss}
               className="relative w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-pink-400 to-rose-400 hover:from-pink-500 hover:to-rose-500 text-white font-semibold text-xs shadow-md shadow-pink-300/50 flex items-center justify-center transition-all active:scale-95 cursor-pointer"
             >
               <span>understood</span>
-              {/* Little rose on top right of the button */}
               <span className="absolute -top-2 -right-1 text-sm select-none transform rotate-12">
                 🌹
               </span>
